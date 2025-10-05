@@ -1,24 +1,28 @@
-name: Tailscale SSH (No Root)
+name: Tailscale SSH (No Root, Working)
 
 on:
   workflow_dispatch:
 
 jobs:
-  connect-tailscale:
+  tailscale:
     runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Tailscale locally (no sudo)
+      - name: Install Tailscale (no sudo)
         run: |
           mkdir -p $HOME/tailscale
           cd $HOME/tailscale
-          curl -fsSL https://pkgs.tailscale.com/stable/tailscale_amd64.tgz -o tailscale.tgz
+          # Download latest Linux AMD64 build from GitHub releases
+          curl -fsSL https://api.github.com/repos/tailscale/tailscale/releases/latest \
+            | grep "browser_download_url.*linux_amd64.tgz" \
+            | cut -d '"' -f 4 \
+            | xargs curl -fsSL -o tailscale.tgz
           tar xzf tailscale.tgz
-          echo "✅ Tailscale binaries extracted to $HOME/tailscale"
+          echo "✅ Tailscale extracted to $HOME/tailscale"
 
-      - name: Start Tailscale (userspace mode)
+      - name: Start Tailscale (userspace)
         env:
           TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
         run: |
@@ -28,8 +32,7 @@ jobs:
           ./tailscale up --authkey=${TS_AUTHKEY} --ssh --hostname=gh-runner
           ./tailscale status
 
-      - name: Confirm IP & SSH readiness
+      - name: Show Tailscale IP
         run: |
           cd $HOME/tailscale
           ./tailscale ip -4
-          echo "✅ Tailscale SSH active (userspace, no sudo)"
