@@ -1,45 +1,35 @@
-name: Tailscale Always Run (Self-hosted)
+name: Tailscale SSH (No Root)
 
 on:
-  workflow_dispatch:  # Manual start
-  push:
-  watch:
-    types: [started]
+  workflow_dispatch:
 
 jobs:
-  tailscale:
+  connect-tailscale:
     runs-on: self-hosted
-
     steps:
-      - name: Prepare environment
-        run: |
-          mkdir -p $HOME/bin
-          cd $HOME/bin
-          echo "⬇️ Downloading Tailscale..."
-          curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.68.1_amd64.tgz -o tailscale.tgz
-          tar -xzf tailscale.tgz
-          ls -R tailscale_1.68.1_amd64 || true
-          mv tailscale_1.68.1_amd64/* .
-          chmod +x tailscale tailscaled
-          echo "✅ Tailscale installed at $HOME/bin"
-          ./tailscale version
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Start Tailscale
+      - name: Install Tailscale locally (no sudo)
+        run: |
+          mkdir -p $HOME/tailscale
+          cd $HOME/tailscale
+          curl -fsSL https://pkgs.tailscale.com/stable/tailscale_amd64.tgz -o tailscale.tgz
+          tar xzf tailscale.tgz
+          echo "✅ Tailscale binaries extracted to $HOME/tailscale"
+
+      - name: Start Tailscale (userspace mode)
         env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
         run: |
-          export PATH=$HOME/bin:$PATH
-          echo "🚀 Starting Tailscaled in user mode..."
-          nohup $HOME/bin/tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > $HOME/tailscaled.log 2>&1 &
-          sleep 8
-          echo "🔐 Logging into Tailscale..."
-          $HOME/bin/tailscale up --authkey=${TAILSCALE_AUTH_KEY} --hostname=github-runner --ssh
-          echo "✅ Connected to Tailscale!"
+          cd $HOME/tailscale
+          ./tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
+          sleep 3
+          ./tailscale up --authkey=${TS_AUTHKEY} --ssh --hostname=gh-runner
+          ./tailscale status
 
-      - name: Show Tailscale IP
+      - name: Confirm IP & SSH readiness
         run: |
-          export PATH=$HOME/bin:$PATH
-          echo "📡 Current Tailscale IP:"
-          $HOME/bin/tailscale ip -4
-          echo "🌐 Status:"
-          $HOME/bin/tailscale status
+          cd $HOME/tailscale
+          ./tailscale ip -4
+          echo "✅ Tailscale SSH active (userspace, no sudo)"
