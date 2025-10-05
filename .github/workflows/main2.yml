@@ -1,24 +1,34 @@
-name: Tailscale SSH (No Root, Working 2025)
+name: Tailscale SSH (No Root, 2025 Stable)
 
 on:
   workflow_dispatch:
 
 jobs:
   tailscale:
-    runs-on: self-hosted
+    runs-on: self-hosted  # or ubuntu-latest if using GitHub-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Tailscale (no sudo)
+      - name: Install jq (if not already available)
+        run: |
+          if ! command -v jq >/dev/null; then
+            echo "Installing jq locally..."
+            mkdir -p $HOME/bin
+            curl -fsSL https://github.com/stedolan/jq/releases/latest/download/jq-linux64 -o $HOME/bin/jq
+            chmod +x $HOME/bin/jq
+            export PATH="$HOME/bin:$PATH"
+          fi
+
+      - name: Install Tailscale (no sudo, no root)
         run: |
           mkdir -p $HOME/tailscale
           cd $HOME/tailscale
-          # ✅ Get latest release tarball URL for amd64 Linux
+          
+          # ✅ Use jq to safely parse GitHub JSON API
           URL=$(curl -fsSL https://api.github.com/repos/tailscale/tailscale/releases/latest \
-            | grep "browser_download_url" \
-            | grep "amd64.tgz" \
-            | cut -d '"' -f 4)
+            | jq -r '.assets[] | select(.name | test("amd64\\.tgz$")) | .browser_download_url')
+
           echo "Downloading: $URL"
           curl -fsSL "$URL" -o tailscale.tgz
           tar xzf tailscale.tgz
