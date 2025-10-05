@@ -1,42 +1,75 @@
-name: 🟢 Always Run — Tailscale Connection
+name: 🟢 Always Run Tailscale (No sudo)
 
 on:
   workflow_dispatch:
-  push:
-  workflow_run:
-  workflow_call:
 
 jobs:
-  tailscale-always:
+  keepalive:
     runs-on: self-hosted
-    timeout-minutes: 0  # disable job timeout (infinite)
+    timeout-minutes: 999999
 
     steps:
-      - name: 📦 Install and start Tailscale (no sudo)
+      - name: 📦 Install Tailscale (no sudo)
         run: |
           mkdir -p $HOME/bin
-          curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.70.0_amd64.tgz -o ts.tgz
-          tar -xzf ts.tgz
-          mv tailscale_*_amd64/tailscale $HOME/bin/
-          mv tailscale_*_amd64/tailscaled $HOME/bin/
+          cd $HOME/bin
+
+          echo "⬇️ Downloading Tailscale..."
+          curl -fsSL https://pkgs.tailscale.com/stable/tailscale_amd64.tgz -o tailscale.tgz
+
+          echo "📦 Extracting..."
+          tar -xzf tailscale.tgz --strip-components=1
+          rm tailscale.tgz
+          chmod +x tailscale*
+
+          echo "✅ Installed Tailscale version:"
+          ./tailscale version
+
+      - name: 🔐 Connect to Tailscale
+        env:
+          TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
+        run: |
           export PATH=$HOME/bin:$PATH
 
           echo "🚀 Starting tailscaled..."
-          nohup $HOME/bin/tailscaled --state=$HOME/tailscale.state --socket=$HOME/tailscale.sock > tailscaled.log 2>&1 &
+          nohup tailscaled \
+            --state=$HOME/tailscaled.state \
+            --socket=$HOME/tailscale.sock \
+            --port=41641 > $HOME/tailscaled.log 2>&1 &
+
           sleep 5
 
-          echo "🔑 Logging into Tailscale..."
-          $HOME/bin/tailscale --socket=$HOME/tailscale.sock up \
-            --authkey=${{ secrets.TAILSCALE_AUTHKEY }} \
-            --ssh --hostname=selfhosted-runner
+          echo "🔑 Logging in to Tailscale..."
+          tailscale up \
+            --socket=$HOME/tailscale.sock \
+            --authkey=${TS_AUTH_KEY} \
+            --ssh \
+            --accept-dns=false || true
 
-      - name: 🌐 Show and monitor IP forever
+          echo "✅ Connection info:"
+          tailscale ip --socket=$HOME/tailscale.sock || true
+
+      - name: 🔄 Keep Tailscale alive forever
         run: |
           export PATH=$HOME/bin:$PATH
-          echo "✅ Connected to Tailscale! Starting infinite loop..."
+          echo "🕒 Starting Tailscale monitor loop..."
           while true; do
-            IP4=$($HOME/bin/tailscale --socket=$HOME/tailscale.sock ip -4 | head -n1)
-            IP6=$($HOME/bin/tailscale --socket=$HOME/tailscale.sock ip -6 | head -n1)
-            echo "🕒 $(date) | IPv4: $IP4 | IPv6: $IP6"
+            echo "---------------------------------------"
+            echo "⏰ $(date)"
+            if tailscale status --socket=$HOME/tailscale.sock >/dev/null 2>&1; then
+              echo "✅ Tailscale OK: $(tailscale ip --socket=$HOME/tailscale.sock | head -n 1)"
+            else
+              echo "⚠️ Tailscale offline — restarting..."
+              nohup tailscaled \
+                --state=$HOME/tailscaled.state \
+                --socket=$HOME/tailscale.sock \
+                --port=41641 > $HOME/tailscaled.log 2>&1 &
+              sleep 5
+              tailscale up \
+                --socket=$HOME/tailscale.sock \
+                --authkey=${TS_AUTH_KEY} \
+                --ssh \
+                --accept-dns=false || echo "⚠️ Reconnect failed"
+            fi
             sleep 300  # check every 5 minutes
           done
