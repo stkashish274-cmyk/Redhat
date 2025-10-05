@@ -1,0 +1,70 @@
+name: 🛰️ Always Running VM Monitor
+
+on:
+  workflow_dispatch: # You can start it manually from Actions tab
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 43200 # 30 days continuous run (GitHub max)
+    
+    steps:
+      - name: 📦 Install oc CLI (no sudo)
+        run: |
+          mkdir -p $HOME/bin
+          cd $HOME/bin
+          echo "⬇️ Downloading oc client..."
+          curl -L -o oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          tar -xzf oc.tar.gz oc
+          chmod +x oc
+          export PATH=$HOME/bin:$PATH
+          ./oc version --client || true
+
+      - name: 🔐 Login to OpenShift
+        env:
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+          OPENSHIFT_URL: ${{ secrets.OPENSHIFT_URL }}
+        run: |
+          export PATH=$HOME/bin:$PATH
+          ./oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_URL" --insecure-skip-tls-verify=true
+          ./oc project stkcyber-dev
+
+      - name: ♾️ Continuous Monitor Loop
+        env:
+          VM_NAME: centos-stream9-tan-flea-48
+          NAMESPACE: stkcyber-dev
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          export PATH=$HOME/bin:$PATH
+          echo "🚀 Starting infinite loop to monitor VM: $VM_NAME"
+
+          while true; do
+            echo "⏰ Checking VM status at $(date)..."
+            STATUS=$(./oc get vm "$VM_NAME" -n "$NAMESPACE" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
+
+            echo "📡 Current VM Status: $STATUS"
+
+            if [ "$STATUS" != "Running" ]; then
+              echo "⚠️ VM is not running — attempting restart..."
+              ./oc stop vm "$VM_NAME" -n "$NAMESPACE" --force --grace-period=0 || true
+              sleep 20
+              ./oc start vm "$VM_NAME" -n "$NAMESPACE" || true
+              sleep 60
+
+              STATUS=$(./oc get vm "$VM_NAME" -n "$NAMESPACE" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
+              MESSAGE="🔄 **VM '$VM_NAME' was stopped and restarted.**\n🟢 Current Status: $STATUS"
+            else
+              MESSAGE="✅ **VM '$VM_NAME' is running and healthy.**"
+            fi
+
+            # Send Discord notification (optional: once per loop)
+            if [ -n "$DISCORD_WEBHOOK" ]; then
+              curl -H "Content-Type: application/json" \
+                   -X POST \
+                   -d "{\"content\": \"$MESSAGE\"}" \
+                   "$DISCORD_WEBHOOK"
+            fi
+
+            echo "💤 Sleeping 5 minutes before next check..."
+            sleep 300
+          done
