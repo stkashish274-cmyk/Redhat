@@ -1,24 +1,27 @@
-name: Always Run Tailscale SSH
+name: Tailscale Always Run (Self-hosted)
 
 on:
-  workflow_dispatch:   # manual start
-  push:                # or start on code push
+  workflow_dispatch:  # Manual start
+  push:
   watch:
-    types: [started]   # keep running
+    types: [started]
 
 jobs:
-  tailscale-ssh:
+  tailscale:
     runs-on: self-hosted
 
     steps:
-      - name: Install Tailscale (no sudo)
+      - name: Prepare environment
         run: |
           mkdir -p $HOME/bin
           cd $HOME/bin
           echo "⬇️ Downloading Tailscale..."
           curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.68.1_amd64.tgz -o tailscale.tgz
-          tar xzf tailscale.tgz --strip-components=1
-          chmod +x tailscale
+          tar -xzf tailscale.tgz
+          ls -R tailscale_1.68.1_amd64 || true
+          mv tailscale_1.68.1_amd64/* .
+          chmod +x tailscale tailscaled
+          echo "✅ Tailscale installed at $HOME/bin"
           ./tailscale version
 
       - name: Start Tailscale
@@ -26,13 +29,17 @@ jobs:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           export PATH=$HOME/bin:$PATH
-          ./tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
-          sleep 5
-          ./tailscale up --authkey=${TAILSCALE_AUTH_KEY} --hostname=github-runner --ssh
+          echo "🚀 Starting Tailscaled in user mode..."
+          nohup $HOME/bin/tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > $HOME/tailscaled.log 2>&1 &
+          sleep 8
+          echo "🔐 Logging into Tailscale..."
+          $HOME/bin/tailscale up --authkey=${TAILSCALE_AUTH_KEY} --hostname=github-runner --ssh
+          echo "✅ Connected to Tailscale!"
 
-      - name: Show Tailscale status
+      - name: Show Tailscale IP
         run: |
           export PATH=$HOME/bin:$PATH
-          ./tailscale status
-          echo "Tailscale IP:"
-          ./tailscale ip -4
+          echo "📡 Current Tailscale IP:"
+          $HOME/bin/tailscale ip -4
+          echo "🌐 Status:"
+          $HOME/bin/tailscale status
