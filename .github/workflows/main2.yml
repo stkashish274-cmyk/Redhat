@@ -1,4 +1,4 @@
-name: Tailscale SSH (No Root, Working)
+name: Tailscale SSH (No Root, Working 2025)
 
 on:
   workflow_dispatch:
@@ -14,15 +14,17 @@ jobs:
         run: |
           mkdir -p $HOME/tailscale
           cd $HOME/tailscale
-          # Download latest Linux AMD64 build from GitHub releases
-          curl -fsSL https://api.github.com/repos/tailscale/tailscale/releases/latest \
-            | grep "browser_download_url.*linux_amd64.tgz" \
-            | cut -d '"' -f 4 \
-            | xargs curl -fsSL -o tailscale.tgz
+          # ✅ Get latest release tarball URL for amd64 Linux
+          URL=$(curl -fsSL https://api.github.com/repos/tailscale/tailscale/releases/latest \
+            | grep "browser_download_url" \
+            | grep "amd64.tgz" \
+            | cut -d '"' -f 4)
+          echo "Downloading: $URL"
+          curl -fsSL "$URL" -o tailscale.tgz
           tar xzf tailscale.tgz
           echo "✅ Tailscale extracted to $HOME/tailscale"
 
-      - name: Start Tailscale (userspace)
+      - name: Start Tailscale (userspace, no root)
         env:
           TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
         run: |
