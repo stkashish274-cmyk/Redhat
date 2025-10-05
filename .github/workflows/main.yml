@@ -1,63 +1,61 @@
-name: Restart OpenShift VM (every hour)
+name: 24/7 OpenShift VM Auto-Restart (No sudo)
 
 on:
-  schedule:
-    - cron: "0 * * * *"  # every hour
   workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"  # every 15 mins fallback check
 
 jobs:
-  restart-vm:
-    runs-on: ubuntu-latest
+  monitor-vm:
+    runs-on: self-hosted
+    timeout-minutes: 0
 
     steps:
-      - name: Download and install oc
+      - name: Install OpenShift CLI and virtctl (no sudo)
         run: |
-          echo "📦 Installing OpenShift CLI (oc)..."
-          curl -L -o oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
-          tar -xzf oc.tar.gz
-          chmod +x oc kubectl
-          mv oc kubectl $HOME
-          echo "$HOME" >> $GITHUB_PATH
-          echo "✅ oc installed successfully"
+          mkdir -p ~/bin && cd ~/bin
 
-      - name: Download and install virtctl
-        run: |
+          echo "📦 Installing oc CLI..."
+          curl -L -o oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          tar -xzf oc.tar.gz >/dev/null 2>&1 || true
+          chmod +x oc kubectl 2>/dev/null || true
+
           echo "📦 Installing virtctl..."
           curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.5.2/virtctl-v1.5.2-linux-amd64
           chmod +x virtctl
-          mv virtctl $HOME
-          echo "$HOME" >> $GITHUB_PATH
-          echo "✅ virtctl installed successfully"
+
+          echo "✅ CLI tools ready."
+          export PATH=$HOME/bin:$PATH
 
       - name: Login to OpenShift
         env:
           OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
           OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
         run: |
-          echo "🔐 Logging into OpenShift..."
-          $HOME/oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
-          $HOME/oc project stkcyber-dev
+          export PATH=$HOME/bin:$PATH
+          ~/bin/oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
+          ~/bin/oc project stkcyber-dev
 
-      - name: Force restart VM
+      - name: Continuous VM monitor loop
         run: |
+          export PATH=$HOME/bin:$PATH
           VM_NAME="centos-stream9-tan-flea-48"
           NS="stkcyber-dev"
 
-          echo "⏹ Forcing VM stop..."
-          $HOME/virtctl stop "$VM_NAME" -n "$NS" --force || echo "⚠️ VM might already be stopped."
-          echo "⏳ Waiting 30 seconds..."
-          sleep 30
+          echo "🟢 VM Monitor started — running forever..."
+          while true; do
+            STATUS=$(~/bin/oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
+            TIME=$(date '+%Y-%m-%d %H:%M:%S')
+            echo "[$TIME] Current VM status: $STATUS"
 
-          echo "▶️ Starting VM..."
-          $HOME/virtctl start "$VM_NAME" -n "$NS" || echo "⚠️ VM may already be running."
+            if [ "$STATUS" = "Running" ]; then
+              echo "✅ VM healthy."
+            else
+              echo "⚠️ VM stopped or crashed — restarting..."
+              ~/bin/virtctl start "$VM_NAME" -n "$NS" || echo "❌ Restart failed"
+              sleep 60
+            fi
 
-          echo "🔍 Checking final VM status..."
-          sleep 20
-          STATUS=$($HOME/oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' || echo "Unknown")
-          echo "📡 Current VM status: $STATUS"
-
-          if [ "$STATUS" = "Running" ]; then
-            echo "✅ VM restarted successfully!"
-          else
-            echo "⚠️ VM did not start properly — check OpenShift console."
-          fi
+            echo "💤 Sleeping for 5 minutes..."
+            sleep 300
+          done
