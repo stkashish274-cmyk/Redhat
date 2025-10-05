@@ -1,4 +1,4 @@
-name: Restart OpenShift VM (every hour, sudo-free)
+name: Restart OpenShift VM (every hour)
 
 on:
   schedule:
@@ -10,22 +10,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install OpenShift CLI (oc)
+      - name: Download and install oc
         run: |
-          echo "📦 Installing oc client..."
+          echo "📦 Installing OpenShift CLI (oc)..."
           curl -L -o oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
-          tar -xzf oc.tar.gz oc kubectl
+          tar -xzf oc.tar.gz
           chmod +x oc kubectl
-          echo "$PWD" >> $GITHUB_PATH
-          oc version --client
+          mv oc kubectl $HOME
+          echo "$HOME" >> $GITHUB_PATH
+          echo "✅ oc installed successfully"
 
-      - name: Install virtctl
+      - name: Download and install virtctl
         run: |
           echo "📦 Installing virtctl..."
           curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.5.2/virtctl-v1.5.2-linux-amd64
           chmod +x virtctl
-          echo "$PWD" >> $GITHUB_PATH
-          virtctl version --client
+          mv virtctl $HOME
+          echo "$HOME" >> $GITHUB_PATH
+          echo "✅ virtctl installed successfully"
 
       - name: Login to OpenShift
         env:
@@ -33,25 +35,25 @@ jobs:
           OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
         run: |
           echo "🔐 Logging into OpenShift..."
-          ./oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
-          ./oc project stkcyber-dev
+          $HOME/oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
+          $HOME/oc project stkcyber-dev
 
-      - name: Force Restart VM
+      - name: Force restart VM
         run: |
           VM_NAME="centos-stream9-tan-flea-48"
           NS="stkcyber-dev"
 
           echo "⏹ Forcing VM stop..."
-          ./virtctl stop "$VM_NAME" -n "$NS" --force || echo "⚠️ VM might already be stopped."
+          $HOME/virtctl stop "$VM_NAME" -n "$NS" --force || echo "⚠️ VM might already be stopped."
           echo "⏳ Waiting 30 seconds..."
           sleep 30
 
           echo "▶️ Starting VM..."
-          ./virtctl start "$VM_NAME" -n "$NS" || echo "⚠️ VM may already be running."
+          $HOME/virtctl start "$VM_NAME" -n "$NS" || echo "⚠️ VM may already be running."
 
           echo "🔍 Checking final VM status..."
           sleep 20
-          STATUS=$(./oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' || echo "Unknown")
+          STATUS=$($HOME/oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' || echo "Unknown")
           echo "📡 Current VM status: $STATUS"
 
           if [ "$STATUS" = "Running" ]; then
