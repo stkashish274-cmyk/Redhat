@@ -2,8 +2,8 @@ name: Restart OpenShift VM (every hour)
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour
-  workflow_dispatch:      # allow manual trigger
+    - cron: "0 * * * *"
+  workflow_dispatch:
 
 jobs:
   restart-vm:
@@ -17,15 +17,13 @@ jobs:
           sudo mv oc /usr/local/bin/
           oc version --client
 
-      - name: Install virtctl (KubeVirt CLI)
+      - name: Install virtctl
         run: |
-          VIRTCTL_VERSION=$(curl -s https://api.github.com/repos/kubevirt/kubevirt/releases/latest | grep tag_name | cut -d '"' -f 4)
-          curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/${VIRTCTL_VERSION}/virtctl-${VIRTCTL_VERSION}-linux-amd64
+          curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.5.2/virtctl-v1.5.2-linux-amd64
           chmod +x virtctl
           sudo mv virtctl /usr/local/bin/
-          virtctl version || true
 
-      - name: Login to OpenShift Sandbox
+      - name: Login to OpenShift
         env:
           OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
           OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
@@ -33,6 +31,17 @@ jobs:
           oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
           oc project stkcyber-dev
 
-      - name: Start VM using virtctl
+      - name: Check and start VM
         run: |
-          virtctl start centos-stream9-tan-flea-48 -n stkcyber-dev
+          VM_NAME="centos-stream9-tan-flea-48"
+          NS="stkcyber-dev"
+
+          STATUS=$(oc get vm $VM_NAME -n $NS -o jsonpath='{.status.printableStatus}')
+          echo "Current VM status: $STATUS"
+
+          if [ "$STATUS" = "Running" ]; then
+            echo "✅ VM is already running. Nothing to do."
+          else
+            echo "🔄 Starting VM..."
+            virtctl start $VM_NAME -n $NS || true
+          fi
