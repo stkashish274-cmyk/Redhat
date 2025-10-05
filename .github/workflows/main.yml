@@ -2,7 +2,7 @@ name: Auto-Restart OpenShift VM (every 5 minutes)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # Every 5 minutes
+    - cron: "*/5 * * * *"  # Runs every 5 minutes
   workflow_dispatch:
 
 jobs:
@@ -24,7 +24,6 @@ jobs:
           curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v0.48.0/virtctl-v0.48.0-linux-amd64
           chmod +x virtctl
 
-          echo "✅ Tools installed in: $HOME/bin"
           echo "$HOME/bin" >> $GITHUB_PATH
 
       - name: Login to OpenShift
@@ -38,6 +37,7 @@ jobs:
           oc project stkcyber-dev
 
       - name: Check and ensure VM is running
+        id: vmcheck
         run: |
           VM_NAME="centos-stream9-tan-flea-48"
           NS="stkcyber-dev"
@@ -48,21 +48,24 @@ jobs:
 
           if [ "$STATUS" = "Running" ]; then
             echo "✅ VM is already running."
+            echo "vm_status=running" >> $GITHUB_OUTPUT
           else
             echo "⚠️ VM is not running. Attempting restart..."
             virtctl start "$VM_NAME" -n "$NS" || echo "⚠️ Start command failed."
             sleep 30
             STATUS2=$(oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
             echo "📡 New status: $STATUS2"
+
             if [ "$STATUS2" = "Running" ]; then
               echo "✅ VM restarted successfully!"
+              echo "vm_status=restarted" >> $GITHUB_OUTPUT
             else
               echo "❌ VM did not start properly — check OpenShift console."
-              exit 1
+              echo "vm_status=failed" >> $GITHUB_OUTPUT
             fi
           fi
 
-          - name: Send Discord Notification
+      - name: Send Discord Notification
         if: always()
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
