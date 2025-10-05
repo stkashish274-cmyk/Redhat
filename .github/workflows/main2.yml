@@ -1,40 +1,25 @@
-name: Tailscale SSH (No Root, 2025 Stable)
-
+name: Tailscale (normal script, no sudo)
 on:
   workflow_dispatch:
 
 jobs:
   tailscale:
-    runs-on: self-hosted  # or ubuntu-latest if using GitHub-hosted
+    runs-on: self-hosted  # or ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install jq (if not already available)
-        run: |
-          if ! command -v jq >/dev/null; then
-            echo "Installing jq locally..."
-            mkdir -p $HOME/bin
-            curl -fsSL https://github.com/stedolan/jq/releases/latest/download/jq-linux64 -o $HOME/bin/jq
-            chmod +x $HOME/bin/jq
-            export PATH="$HOME/bin:$PATH"
-          fi
-
-      - name: Install Tailscale (no sudo, no root)
+      - name: Download Tailscale with normal script (no sudo)
         run: |
           mkdir -p $HOME/tailscale
           cd $HOME/tailscale
-          
-          # ✅ Use jq to safely parse GitHub JSON API
-          URL=$(curl -fsSL https://api.github.com/repos/tailscale/tailscale/releases/latest \
-            | jq -r '.assets[] | select(.name | test("amd64\\.tgz$")) | .browser_download_url')
-
-          echo "Downloading: $URL"
-          curl -fsSL "$URL" -o tailscale.tgz
+          # Just fetch and unpack — skip system install
+          curl -fsSL https://tailscale.com/install.sh -o install.sh
+          bash install.sh --dry-run | grep "https://pkgs" | grep ".tgz" | head -n1 | xargs curl -fsSL -o tailscale.tgz
           tar xzf tailscale.tgz
           echo "✅ Tailscale extracted to $HOME/tailscale"
 
-      - name: Start Tailscale (userspace, no root)
+      - name: Start Tailscale (userspace)
         env:
           TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
         run: |
@@ -44,7 +29,7 @@ jobs:
           ./tailscale up --authkey=${TS_AUTHKEY} --ssh --hostname=gh-runner
           ./tailscale status
 
-      - name: Show Tailscale IP
+      - name: Show IP
         run: |
           cd $HOME/tailscale
           ./tailscale ip -4
