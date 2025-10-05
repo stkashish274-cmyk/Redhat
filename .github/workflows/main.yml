@@ -1,4 +1,4 @@
-name: Force Restart OpenShift VM Every Hour
+name: Force Restart OpenShift VM (every hour)
 
 on:
   schedule:
@@ -6,18 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  force-restart-vm:
+  restart-vm:
     runs-on: ubuntu-latest
-    name: Force Restart OpenShift Virtual Machine
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
       - name: Install OpenShift CLI (oc)
         run: |
-          echo "📦 Installing OpenShift CLI..."
-          curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz -o oc.tar.gz
+          echo "📦 Installing oc..."
+          curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz -o oc.tar.gz
           tar -xzf oc.tar.gz
           sudo mv oc /usr/local/bin/
           sudo chmod +x /usr/local/bin/oc
@@ -26,41 +22,48 @@ jobs:
       - name: Install virtctl
         run: |
           echo "📦 Installing virtctl..."
-          # Download from official KubeVirt GitHub releases
-          VIRTCTL_VERSION=$(curl -s https://api.github.com/repos/kubevirt/kubevirt/releases/latest | grep tag_name | cut -d '"' -f 4)
-          curl -L -o virtctl.tar.gz https://github.com/kubevirt/kubevirt/releases/download/${VIRTCTL_VERSION}/virtctl-${VIRTCTL_VERSION}-linux-amd64.tar.gz
-          tar -xzf virtctl.tar.gz
+          curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.5.2/virtctl-v1.5.2-linux-amd64
+          chmod +x virtctl
           sudo mv virtctl /usr/local/bin/
-          sudo chmod +x /usr/local/bin/virtctl
           virtctl version || echo "virtctl installed successfully."
 
       - name: Login to OpenShift
+        env:
+          OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
         run: |
           echo "🔑 Logging into OpenShift..."
-          oc login --token=${{ secrets.OPENSHIFT_TOKEN }} --server=${{ secrets.OPENSHIFT_API_URL }}
+          oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
+          oc project stkcyber-dev
 
       - name: Force Restart VM
         run: |
           VM_NAME="centos-stream9-tan-flea-48"
-          NAMESPACE="stkcyber-dev"
+          NS="stkcyber-dev"
 
-          echo "⏹ Stopping VM..."
-          virtctl stop "$VM_NAME" -n "$NAMESPACE" --graceful=false || echo "VM might already be stopped."
+          echo "⏹ Forcing VM stop..."
+          virtctl stop "$VM_NAME" -n "$NS" --graceful=false || echo "VM might already be stopped."
 
           echo "⏳ Waiting 20 seconds before restart..."
           sleep 20
 
           echo "▶️ Starting VM..."
-          virtctl start "$VM_NAME" -n "$NAMESPACE"
+          virtctl start "$VM_NAME" -n "$NS"
 
-          echo "✅ VM $VM_NAME force restarted successfully at $(date)"
+          echo "✅ VM $VM_NAME restarted successfully at $(date)"
 
       - name: Verify VM Status
         run: |
           VM_NAME="centos-stream9-tan-flea-48"
-          NAMESPACE="stkcyber-dev"
+          NS="stkcyber-dev"
 
-          echo "🔍 Checking VM status..."
-          virtctl status "$VM_NAME" -n "$NAMESPACE" || echo "⚠️ Status check failed"
+          echo "🔍 Checking final VM status..."
+          STATUS=$(oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}')
+          echo "📡 Current VM status: $STATUS"
 
-          echo "🎯 Restart cycle complete."
+          if [ "$STATUS" = "Running" ]; then
+            echo "✅ VM is running after restart."
+          else
+            echo "⚠️ VM did not start properly — check OpenShift console."
+            exit 1
+          fi
