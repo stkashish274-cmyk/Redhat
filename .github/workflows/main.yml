@@ -63,3 +63,22 @@ jobs:
 
           echo "⚠️ VM did not reach Running state within 2 minutes."
           exit 1
+
+      - name: Notify Discord
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          RESULT="${{ steps.restart.outputs.result }}"
+          if [ "$RESULT" = "success" ]; then
+            COLOR=3066993
+            STATUS_MSG="✅ VM restarted and running successfully."
+          else
+            COLOR=15158332
+            STATUS_MSG="⚠️ VM restart failed or did not reach running state."
+          fi
+
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d "{\"embeds\": [{\"title\": \"OpenShift VM Auto-Restart\", \"description\": \"$STATUS_MSG\", \"color\": $COLOR, \"footer\": {\"text\": \"$(date '+%Y-%m-%d %H:%M:%S UTC')\"}}]}" \
+               "$DISCORD_WEBHOOK_URL"
