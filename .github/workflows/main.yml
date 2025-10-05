@@ -1,0 +1,29 @@
+name: Restart OpenShift VM (every hour)
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # every hour
+  workflow_dispatch:      # allow manual trigger
+
+jobs:
+  restart-vm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install OpenShift CLI (oc)
+        run: |
+          curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz -o oc.tar.gz
+          tar -xzf oc.tar.gz
+          sudo mv oc /usr/local/bin/
+          oc version --client
+
+      - name: Login to OpenShift Sandbox
+        env:
+          OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+        run: |
+          oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
+
+      - name: Start VM
+        run: |
+          oc start vm centos-stream9-tan-flea-48 -n stkcyber-dev
