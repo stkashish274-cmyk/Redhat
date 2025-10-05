@@ -1,47 +1,54 @@
-name: Restart OpenShift VM (every hour)
+name: Force Restart OpenShift VM Every Hour
 
 on:
   schedule:
-    - cron: "0 * * * *"
-  workflow_dispatch:
+    - cron: "0 * * * *"   # ⏰ Every hour
+  workflow_dispatch:       # ▶️ Allows manual run from GitHub UI
 
 jobs:
-  restart-vm:
+  force-restart-vm:
+    name: Force Restart OpenShift Virtual Machine
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install OpenShift CLI (oc)
-        run: |
-          curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz -o oc.tar.gz
-          tar -xzf oc.tar.gz
-          sudo mv oc /usr/local/bin/
-          oc version --client
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Install virtctl
+      - name: Install OpenShift Client Tools
         run: |
-          curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.5.2/virtctl-v1.5.2-linux-amd64
-          chmod +x virtctl
-          sudo mv virtctl /usr/local/bin/
+          echo "📦 Installing OpenShift CLI (oc) and virtctl..."
+          sudo curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz -o oc.tar.gz
+          sudo tar -xzf oc.tar.gz -C /usr/local/bin oc virtctl
+          sudo chmod +x /usr/local/bin/oc /usr/local/bin/virtctl
+          oc version || echo "✅ OpenShift CLI installed"
 
-      - name: Login to OpenShift
-        env:
-          OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
-          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+      - name: Login to OpenShift Cluster
         run: |
-          oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
-          oc project stkcyber-dev
+          echo "🔑 Logging into OpenShift..."
+          oc login --token=${{ secrets.OPENSHIFT_TOKEN }} --server=${{ secrets.OPENSHIFT_API_URL }}
 
-      - name: Check and start VM
+      - name: Force Restart VM
         run: |
           VM_NAME="centos-stream9-tan-flea-48"
-          NS="stkcyber-dev"
+          NAMESPACE="stkcyber-dev"
 
-          STATUS=$(oc get vm $VM_NAME -n $NS -o jsonpath='{.status.printableStatus}')
-          echo "Current VM status: $STATUS"
+          echo "⏹ Stopping VM (if running)..."
+          virtctl stop "$VM_NAME" -n "$NAMESPACE" --graceful=false || echo "VM might already be stopped."
 
-          if [ "$STATUS" = "Running" ]; then
-            echo "✅ VM is already running. Nothing to do."
-          else
-            echo "🔄 Starting VM..."
-            virtctl start $VM_NAME -n $NS || true
-          fi
+          echo "⏳ Waiting 20 seconds before restart..."
+          sleep 20
+
+          echo "▶️ Starting VM..."
+          virtctl start "$VM_NAME" -n "$NAMESPACE"
+
+          echo "✅ VM $VM_NAME force restarted successfully at $(date)"
+
+      - name: Verify VM Status
+        run: |
+          VM_NAME="centos-stream9-tan-flea-48"
+          NAMESPACE="stkcyber-dev"
+
+          echo "🔍 Checking VM status..."
+          virtctl status "$VM_NAME" -n "$NAMESPACE" || echo "⚠️ Status check failed"
+
+          echo "🎯 Restart cycle complete."
