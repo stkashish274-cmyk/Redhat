@@ -1,66 +1,42 @@
-name: ♾️ Keep OpenShift VM Always Running (Continuous)
+name: 🟢 Always Run — Tailscale Connection
 
 on:
-  workflow_dispatch:  # manual start only (runs forever)
+  workflow_dispatch:
+  push:
+  workflow_run:
+  workflow_call:
 
 jobs:
-  monitor-vm:
+  tailscale-always:
     runs-on: self-hosted
-    timeout-minutes: 43200  # 30 days max per run
+    timeout-minutes: 0  # disable job timeout (infinite)
+
     steps:
-      - name: 🧰 Install oc (compatible version)
+      - name: 📦 Install and start Tailscale (no sudo)
         run: |
-          echo "📦 Installing oc v4.9.59..."
           mkdir -p $HOME/bin
-          cd $HOME/bin
-          curl -L -o oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.9.59/openshift-client-linux.tar.gz
-          tar -xzf oc.tar.gz
-          chmod +x oc kubectl
-          echo "$HOME/bin" >> $GITHUB_PATH
+          curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.70.0_amd64.tgz -o ts.tgz
+          tar -xzf ts.tgz
+          mv tailscale_*_amd64/tailscale $HOME/bin/
+          mv tailscale_*_amd64/tailscaled $HOME/bin/
           export PATH=$HOME/bin:$PATH
-          oc version --client || true
 
-      - name: 🔐 Login to OpenShift
-        env:
-          OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
-          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+          echo "🚀 Starting tailscaled..."
+          nohup $HOME/bin/tailscaled --state=$HOME/tailscale.state --socket=$HOME/tailscale.sock > tailscaled.log 2>&1 &
+          sleep 5
+
+          echo "🔑 Logging into Tailscale..."
+          $HOME/bin/tailscale --socket=$HOME/tailscale.sock up \
+            --authkey=${{ secrets.TAILSCALE_AUTHKEY }} \
+            --ssh --hostname=selfhosted-runner
+
+      - name: 🌐 Show and monitor IP forever
         run: |
           export PATH=$HOME/bin:$PATH
-          echo "🔐 Logging into OpenShift..."
-          ./oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
-          ./oc project stkcyber-dev
-
-      - name: ♾️ Keep VM Alive Forever
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          export PATH=$HOME/bin:$PATH
-          VM_NAME="centos-stream9-tan-flea-48"
-          NS="stkcyber-dev"
-
-          echo "🚀 Continuous monitor started. Checking VM every 5 minutes..."
+          echo "✅ Connected to Tailscale! Starting infinite loop..."
           while true; do
-            STATUS=$(./oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
-            TIME=$(date '+%Y-%m-%d %H:%M:%S')
-            echo "[$TIME] Current VM status: $STATUS"
-
-            if [ "$STATUS" != "Running" ]; then
-              echo "⚠️ VM not running! Restarting..."
-              ./oc delete vmi "$VM_NAME" -n "$NS" --ignore-not-found=true || true
-              sleep 10
-              ./oc start vm "$VM_NAME" -n "$NS" || true
-              MSG="🔁 Restarted **$VM_NAME** at $TIME — previous status: $STATUS"
-            else
-              MSG="✅ **$VM_NAME** is running normally at $TIME"
-            fi
-
-            if [ -n "$DISCORD_WEBHOOK_URL" ]; then
-              curl -H "Content-Type: application/json" \
-                   -X POST \
-                   -d "{\"content\": \"$MSG\"}" \
-                   "$DISCORD_WEBHOOK_URL" >/dev/null 2>&1 || true
-            fi
-
-            echo "⏳ Sleeping for 5 minutes..."
-            sleep 300
+            IP4=$($HOME/bin/tailscale --socket=$HOME/tailscale.sock ip -4 | head -n1)
+            IP6=$($HOME/bin/tailscale --socket=$HOME/tailscale.sock ip -6 | head -n1)
+            echo "🕒 $(date) | IPv4: $IP4 | IPv6: $IP6"
+            sleep 300  # check every 5 minutes
           done
