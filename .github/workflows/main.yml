@@ -61,3 +61,31 @@ jobs:
               exit 1
             fi
           fi
+
+          - name: Send Discord Notification
+        if: always()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          STATUS="${{ steps.vmcheck.outputs.vm_status }}"
+          if [ -z "$STATUS" ]; then STATUS="unknown"; fi
+
+          case "$STATUS" in
+            running)
+              MESSAGE="✅ VM \`centos-stream9-tan-flea-48\` is already running and healthy."
+              ;;
+            restarted)
+              MESSAGE="🔄 VM \`centos-stream9-tan-flea-48\` was stopped and has been **restarted successfully**."
+              ;;
+            failed)
+              MESSAGE="❌ VM \`centos-stream9-tan-flea-48\` failed to start. Please check OpenShift console."
+              ;;
+            *)
+              MESSAGE="⚠️ VM status unknown — check manually."
+              ;;
+          esac
+
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d "{\"content\": \"$MESSAGE\"}" \
+               "$DISCORD_WEBHOOK"
