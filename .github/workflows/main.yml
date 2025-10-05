@@ -1,4 +1,4 @@
-name: Force Restart OpenShift VM (every hour)
+name: Force Restart OpenShift VM (every hour with Discord alert)
 
 on:
   schedule:
@@ -37,18 +37,19 @@ jobs:
           oc project stkcyber-dev
 
       - name: Force Restart VM
+        id: restart
         run: |
           VM_NAME="centos-stream9-tan-flea-48"
           NS="stkcyber-dev"
 
           echo "⏹ Forcing VM stop..."
-          virtctl stop "$VM_NAME" -n "$NS" --graceful=false || echo "VM might already be stopped."
+          virtctl stop "$VM_NAME" -n "$NS" || echo "VM might already be stopped."
 
-          echo "⏳ Waiting 20 seconds before restart..."
-          sleep 20
+          echo "⏳ Waiting 30 seconds before restart..."
+          sleep 30
 
           echo "▶️ Starting VM..."
-          virtctl start "$VM_NAME" -n "$NS"
+          virtctl start "$VM_NAME" -n "$NS" || echo "VM might already be running."
 
           echo "⏳ Waiting for VM to reach 'Running' state..."
           for i in {1..12}; do
@@ -56,12 +57,14 @@ jobs:
             echo "Attempt $i: $STATUS"
             if [ "$STATUS" = "Running" ]; then
               echo "✅ VM is now running!"
+              echo "result=success" >> $GITHUB_OUTPUT
               exit 0
             fi
             sleep 10
           done
 
           echo "⚠️ VM did not reach Running state within 2 minutes."
+          echo "result=failure" >> $GITHUB_OUTPUT
           exit 1
 
       - name: Notify Discord
@@ -72,10 +75,10 @@ jobs:
           RESULT="${{ steps.restart.outputs.result }}"
           if [ "$RESULT" = "success" ]; then
             COLOR=3066993
-            STATUS_MSG="✅ VM restarted and running successfully."
+            STATUS_MSG="✅ VM *centos-stream9-tan-flea-48* restarted and running successfully."
           else
             COLOR=15158332
-            STATUS_MSG="⚠️ VM restart failed or did not reach running state."
+            STATUS_MSG="⚠️ VM *centos-stream9-tan-flea-48* failed to restart or reach running state."
           fi
 
           curl -H "Content-Type: application/json" \
