@@ -1,87 +1,80 @@
-name: Force Restart OpenShift VM (every hour with Discord alert)
+name: Continuous OpenShift VM Watchdog
 
 on:
-  schedule:
-    - cron: "0 * * * *"   # Every hour
-  workflow_dispatch:
+  workflow_dispatch:   # allows manual start only (runs forever after start)
 
 jobs:
-  restart-vm:
-    runs-on: ubuntu-latest
+  watchdog:
+    runs-on: self-hosted
 
     steps:
-      - name: Install OpenShift CLI (oc)
+      - name: Setup environment
         run: |
-          echo "📦 Installing oc..."
-          curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz -o oc.tar.gz
-          tar -xzf oc.tar.gz
-          sudo mv oc /usr/local/bin/
-          sudo chmod +x /usr/local/bin/oc
-          oc version --client
+          echo "🧰 Installing required tools..."
+          sudo apt-get update -y
+          sudo apt-get install -y curl jq
 
-      - name: Install virtctl
-        run: |
-          echo "📦 Installing virtctl..."
-          curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.5.2/virtctl-v1.5.2-linux-amd64
-          chmod +x virtctl
-          sudo mv virtctl /usr/local/bin/
-          virtctl version || echo "virtctl installed successfully."
+          # Install oc
+          if ! command -v oc &>/dev/null; then
+            echo "📦 Installing OpenShift CLI..."
+            curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz -o oc.tar.gz
+            tar -xzf oc.tar.gz
+            sudo mv oc /usr/local/bin/
+            sudo chmod +x /usr/local/bin/oc
+          fi
 
-      - name: Login to OpenShift
+          # Install virtctl
+          if ! command -v virtctl &>/dev/null; then
+            echo "📦 Installing virtctl..."
+            curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v1.5.2/virtctl-v1.5.2-linux-amd64
+            chmod +x virtctl
+            sudo mv virtctl /usr/local/bin/
+          fi
+
+      - name: Start Continuous Watchdog
         env:
           OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
           OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
-        run: |
-          echo "🔑 Logging into OpenShift..."
-          oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
-          oc project stkcyber-dev
-
-      - name: Force Restart VM
-        id: restart
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           VM_NAME="centos-stream9-tan-flea-48"
           NS="stkcyber-dev"
+          INTERVAL=600  # 10 minutes
 
-          echo "⏹ Forcing VM stop..."
-          virtctl stop "$VM_NAME" -n "$NS" || echo "VM might already be stopped."
+          echo "🐾 Starting continuous OpenShift VM watchdog..."
+          oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
+          oc project "$NS"
 
-          echo "⏳ Waiting 30 seconds before restart..."
-          sleep 30
-
-          echo "▶️ Starting VM..."
-          virtctl start "$VM_NAME" -n "$NS" || echo "VM might already be running."
-
-          echo "⏳ Waiting for VM to reach 'Running' state..."
-          for i in {1..12}; do
+          while true; do
+            echo "⏰ Checking VM status at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
             STATUS=$(oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
-            echo "Attempt $i: $STATUS"
-            if [ "$STATUS" = "Running" ]; then
-              echo "✅ VM is now running!"
-              echo "result=success" >> $GITHUB_OUTPUT
-              exit 0
+
+            if [ "$STATUS" != "Running" ]; then
+              echo "⚠️ VM is not running (status: $STATUS). Restarting now..."
+              virtctl stop "$VM_NAME" -n "$NS" || echo "Stop skipped."
+              sleep 10
+              virtctl start "$VM_NAME" -n "$NS"
+
+              echo "🔄 Waiting 30s for restart..."
+              sleep 30
+
+              STATUS=$(oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
+              echo "📡 New status: $STATUS"
+
+              MSG="⚠️ VM *$VM_NAME* was restarted. Current status: *$STATUS*"
+              COLOR=15158332
+            else
+              echo "✅ VM is running normally."
+              MSG="✅ VM *$VM_NAME* is running normally."
+              COLOR=3066993
             fi
-            sleep 10
+
+            # Send Discord alert every cycle (or only on restart if you prefer)
+            curl -H "Content-Type: application/json" \
+                 -X POST \
+                 -d "{\"embeds\":[{\"title\":\"OpenShift VM Watchdog\",\"description\":\"$MSG\",\"color\":$COLOR,\"footer\":{\"text\":\"$(date -u '+%Y-%m-%d %H:%M:%S UTC')\"}}]}" \
+                 "$DISCORD_WEBHOOK_URL" || true
+
+            echo "💤 Sleeping for $INTERVAL seconds..."
+            sleep "$INTERVAL"
           done
-
-          echo "⚠️ VM did not reach Running state within 2 minutes."
-          echo "result=failure" >> $GITHUB_OUTPUT
-          exit 1
-
-      - name: Notify Discord
-        if: always()
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          RESULT="${{ steps.restart.outputs.result }}"
-          if [ "$RESULT" = "success" ]; then
-            COLOR=3066993
-            STATUS_MSG="✅ VM *centos-stream9-tan-flea-48* restarted and running successfully."
-          else
-            COLOR=15158332
-            STATUS_MSG="⚠️ VM *centos-stream9-tan-flea-48* failed to restart or reach running state."
-          fi
-
-          curl -H "Content-Type: application/json" \
-               -X POST \
-               -d "{\"embeds\": [{\"title\": \"OpenShift VM Auto-Restart\", \"description\": \"$STATUS_MSG\", \"color\": $COLOR, \"footer\": {\"text\": \"$(date '+%Y-%m-%d %H:%M:%S UTC')\"}}]}" \
-               "$DISCORD_WEBHOOK_URL"
