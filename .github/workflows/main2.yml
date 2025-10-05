@@ -1,73 +1,66 @@
-name: 🛰️ Always Running VM Monitor
+name: ♾️ Keep OpenShift VM Always Running (Continuous)
 
 on:
-  workflow_dispatch: # Run manually
-  # Uncomment below if you want it to auto-restart daily too
-  # schedule:
-  #   - cron: "0 0 * * *" # every day at midnight (optional)
+  workflow_dispatch:  # manual start only (runs forever)
 
 jobs:
-  keep-alive:
+  monitor-vm:
     runs-on: self-hosted
-    timeout-minutes: 43200 # 30 days continuous run (GitHub max)
-
+    timeout-minutes: 43200  # 30 days max per run
     steps:
-      - name: 📦 Install OpenShift CLI (no sudo)
+      - name: 🧰 Install oc (compatible version)
         run: |
+          echo "📦 Installing oc v4.9.59..."
           mkdir -p $HOME/bin
           cd $HOME/bin
-          echo "⬇️ Downloading oc client..."
-          curl -L -o oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          curl -L -o oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.9.59/openshift-client-linux.tar.gz
           tar -xzf oc.tar.gz
           chmod +x oc kubectl
           echo "$HOME/bin" >> $GITHUB_PATH
+          export PATH=$HOME/bin:$PATH
           oc version --client || true
 
       - name: 🔐 Login to OpenShift
         env:
+          OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
           OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
-          OPENSHIFT_URL: ${{ secrets.OPENSHIFT_URL }}
         run: |
           export PATH=$HOME/bin:$PATH
-          oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_URL" --insecure-skip-tls-verify=true
-          oc project stkcyber-dev
+          echo "🔐 Logging into OpenShift..."
+          ./oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
+          ./oc project stkcyber-dev
 
-      - name: ♾️ Continuous Monitor Loop
+      - name: ♾️ Keep VM Alive Forever
         env:
-          VM_NAME: centos-stream9-tan-flea-48
-          NAMESPACE: stkcyber-dev
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           export PATH=$HOME/bin:$PATH
-          echo "🚀 Starting infinite loop to monitor VM: $VM_NAME"
+          VM_NAME="centos-stream9-tan-flea-48"
+          NS="stkcyber-dev"
 
+          echo "🚀 Continuous monitor started. Checking VM every 5 minutes..."
           while true; do
-            echo "⏰ Checking VM status at $(date)..."
-            STATUS=$(oc get vm "$VM_NAME" -n "$NAMESPACE" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
-
-            echo "📡 Current VM Status: $STATUS"
+            STATUS=$(./oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
+            TIME=$(date '+%Y-%m-%d %H:%M:%S')
+            echo "[$TIME] Current VM status: $STATUS"
 
             if [ "$STATUS" != "Running" ]; then
-              echo "⚠️ VM is not running — restarting..."
-              oc stop vm "$VM_NAME" -n "$NAMESPACE" --grace-period=0 --force=true || true
-              sleep 20
-              oc start vm "$VM_NAME" -n "$NAMESPACE" || true
-              sleep 60
-
-              STATUS=$(oc get vm "$VM_NAME" -n "$NAMESPACE" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
-              MESSAGE="🔄 **VM '$VM_NAME' was stopped and restarted.**\n🟢 Current Status: $STATUS"
+              echo "⚠️ VM not running! Restarting..."
+              ./oc delete vmi "$VM_NAME" -n "$NS" --ignore-not-found=true || true
+              sleep 10
+              ./oc start vm "$VM_NAME" -n "$NS" || true
+              MSG="🔁 Restarted **$VM_NAME** at $TIME — previous status: $STATUS"
             else
-              MESSAGE="✅ **VM '$VM_NAME' is running normally.**"
+              MSG="✅ **$VM_NAME** is running normally at $TIME"
             fi
 
-            # Send Discord notification (optional)
-            if [ -n "$DISCORD_WEBHOOK" ]; then
+            if [ -n "$DISCORD_WEBHOOK_URL" ]; then
               curl -H "Content-Type: application/json" \
                    -X POST \
-                   -d "{\"content\": \"$MESSAGE\"}" \
-                   "$DISCORD_WEBHOOK"
+                   -d "{\"content\": \"$MSG\"}" \
+                   "$DISCORD_WEBHOOK_URL" >/dev/null 2>&1 || true
             fi
 
-            echo "💤 Sleeping 5 minutes before next check..."
+            echo "⏳ Sleeping for 5 minutes..."
             sleep 300
           done
