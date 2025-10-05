@@ -1,8 +1,8 @@
-name: Auto-Start OpenShift VM (every 5 minutes)
+name: Auto-Restart OpenShift VM (every 5 minutes)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # Run every 5 minutes
+    - cron: "*/5 * * * *"  # Every 5 minutes
   workflow_dispatch:
 
 jobs:
@@ -10,21 +10,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install OpenShift CLI and virtctl (no sudo)
+      - name: Prepare CLI tools (oc + virtctl)
         run: |
-          mkdir -p ~/bin && cd ~/bin
+          mkdir -p $HOME/bin
+          cd $HOME/bin
 
-          echo "📦 Installing OpenShift CLI (GLIBC compatible)..."
+          echo "📦 Installing OpenShift CLI (compatible)..."
           curl -L -o oc.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.7.0/openshift-client-linux.tar.gz
-          tar -xzf oc.tar.gz >/dev/null 2>&1 || true
-          chmod +x oc kubectl 2>/dev/null || true
+          tar -xzf oc.tar.gz
+          chmod +x oc kubectl
 
           echo "📦 Installing virtctl..."
           curl -L -o virtctl https://github.com/kubevirt/kubevirt/releases/download/v0.48.0/virtctl-v0.48.0-linux-amd64
           chmod +x virtctl
 
-          echo "✅ CLI tools ready."
-          export PATH=$HOME/bin:$PATH
+          echo "✅ Tools installed in: $HOME/bin"
           echo "$HOME/bin" >> $GITHUB_PATH
 
       - name: Login to OpenShift
@@ -32,28 +32,27 @@ jobs:
           OPENSHIFT_API_URL: ${{ secrets.OPENSHIFT_API_URL }}
           OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
         run: |
-          export PATH=$HOME/bin:$PATH
           echo "🔐 Logging in to OpenShift..."
-          ./oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
-          ./oc project stkcyber-dev
+          oc version --client || echo "oc not found in PATH?"
+          oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
+          oc project stkcyber-dev
 
       - name: Check and ensure VM is running
         run: |
-          export PATH=$HOME/bin:$PATH
           VM_NAME="centos-stream9-tan-flea-48"
           NS="stkcyber-dev"
 
           echo "🔍 Checking VM status..."
-          STATUS=$(./oc get vm $VM_NAME -n $NS -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
+          STATUS=$(oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
           echo "📡 Current VM status: $STATUS"
 
           if [ "$STATUS" = "Running" ]; then
             echo "✅ VM is already running."
           else
             echo "⚠️ VM is not running. Attempting restart..."
-            ./virtctl start "$VM_NAME" -n "$NS" || echo "⚠️ Failed to start VM."
+            virtctl start "$VM_NAME" -n "$NS" || echo "⚠️ Start command failed."
             sleep 30
-            STATUS2=$(./oc get vm $VM_NAME -n $NS -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
+            STATUS2=$(oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
             echo "📡 New status: $STATUS2"
             if [ "$STATUS2" = "Running" ]; then
               echo "✅ VM restarted successfully!"
