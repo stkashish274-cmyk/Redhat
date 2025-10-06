@@ -7,7 +7,7 @@ on:
 
 jobs:
   keep-vm-running:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Prepare CLI tools (oc + virtctl)
