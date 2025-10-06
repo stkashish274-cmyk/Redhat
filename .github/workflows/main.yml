@@ -34,15 +34,17 @@ jobs:
           echo "🔐 Logging in to OpenShift..."
           oc version --client || echo "oc not found in PATH?"
           oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_API_URL" --insecure-skip-tls-verify
-          oc project stkcyber-dev
+
+          echo "📁 Switching to your project..."
+          oc project ashisham029-dev
 
       - name: Check and ensure VM is running
         id: vmcheck
         run: |
-          VM_NAME="centos-stream9-tan-flea-48"
-          NS="stkcyber-dev"
+          VM_NAME="rhel8-lavender-tiglon-57"
+          NS="ashisham029-dev"
 
-          echo "🔍 Checking VM status..."
+          echo "🔍 Checking VM status in namespace: $NS ..."
           STATUS=$(oc get vm "$VM_NAME" -n "$NS" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "Unknown")
           echo "📡 Current VM status: $STATUS"
 
@@ -75,13 +77,13 @@ jobs:
 
           case "$STATUS" in
             running)
-              MESSAGE="✅ VM \`centos-stream9-tan-flea-48\` is already running and healthy."
+              MESSAGE="✅ VM \`rhel8-lavender-tiglon-57\` is already running and healthy."
               ;;
             restarted)
-              MESSAGE="🔄 VM \`centos-stream9-tan-flea-48\` was stopped and has been **restarted successfully**."
+              MESSAGE="🔄 VM \`rhel8-lavender-tiglon-57\` was stopped and has been **restarted successfully**."
               ;;
             failed)
-              MESSAGE="❌ VM \`centos-stream9-tan-flea-48\` failed to start. Please check OpenShift console."
+              MESSAGE="❌ VM \`rhel8-lavender-tiglon-57\` failed to start. Please check OpenShift console."
               ;;
             *)
               MESSAGE="⚠️ VM status unknown — check manually."
