@@ -41,7 +41,7 @@ jobs:
       - name: Check and ensure VM is running
         id: vmcheck
         run: |
-          VM_NAME="centos-stream9-orange-swan-23"
+          VM_NAME="centos-stream9-gray-anglerfish-48"
           NS="ashisham029-dev"
 
           echo "🔍 Checking VM status in namespace: $NS ..."
