@@ -67,51 +67,50 @@ jobs:
             fi
           fi
 
-- name: Send Discord Notification (Embedded)
-  if: always()
-  env:
-    DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-    RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-  run: |
-    STATUS="${{ steps.vmcheck.outputs.vm_status }}"
-    if [ -z "$STATUS" ]; then STATUS="unknown"; fi
+      # 📣 Embedded Discord Notification Step
+      - name: Send Discord Notification (Embedded)
+        if: always()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          STATUS="${{ steps.vmcheck.outputs.vm_status }}"
+          if [ -z "$STATUS" ]; then STATUS="unknown"; fi
 
-    case "$STATUS" in
-      running)
-        TITLE="✅ VM Running"
-        DESCRIPTION="VM \`rhel8-lavender-tiglon-57\` is already running and healthy."
-        COLOR=3066993   # Green
-        ;;
-      restarted)
-        TITLE="🔄 VM Restarted"
-        DESCRIPTION="VM \`rhel8-lavender-tiglon-57\` was stopped and has been **restarted successfully**."
-        COLOR=3447003   # Blue
-        ;;
-      failed)
-        TITLE="❌ VM Start Failed"
-        DESCRIPTION="VM \`rhel8-lavender-tiglon-57\` failed to start. Please check the OpenShift console."
-        COLOR=15158332  # Red
-        ;;
-      *)
-        TITLE="⚠️ VM Status Unknown"
-        DESCRIPTION="VM \`rhel8-lavender-tiglon-57\` status is unknown — please check manually."
-        COLOR=15844367  # Yellow
-        ;;
-    esac
+          case "$STATUS" in
+            running)
+              TITLE="✅ VM Running"
+              DESCRIPTION="VM \`centos-stream9-orange-swan-23\` is already running and healthy."
+              COLOR=3066993   # Green
+              ;;
+            restarted)
+              TITLE="🔄 VM Restarted"
+              DESCRIPTION="VM \`centos-stream9-orange-swan-23\` was stopped and has been **restarted successfully**."
+              COLOR=3447003   # Blue
+              ;;
+            failed)
+              TITLE="❌ VM Start Failed"
+              DESCRIPTION="VM \`centos-stream9-orange-swan-23\` failed to start. Please check the OpenShift console."
+              COLOR=15158332  # Red
+              ;;
+            *)
+              TITLE="⚠️ VM Status Unknown"
+              DESCRIPTION="VM \`centos-stream9-orange-swan-23\` status is unknown — please check manually."
+              COLOR=15844367  # Yellow
+              ;;
+          esac
 
-    # Escape double quotes for JSON safety
-    DESCRIPTION_ESCAPED=$(echo "$DESCRIPTION" | sed 's/"/\\"/g')
+          DESCRIPTION_ESCAPED=$(echo "$DESCRIPTION" | sed 's/"/\\"/g')
 
-    # Send to Discord as an embed
-    curl -H "Content-Type: application/json" \
-         -X POST \
-         -d "{
-              \"embeds\": [{
-                \"title\": \"$TITLE\",
-                \"description\": \"$DESCRIPTION_ESCAPED\",
-                \"color\": $COLOR,
-                \"footer\": { \"text\": \"GitHub Actions • $(date '+%Y-%m-%d %H:%M:%S')\" },
-                \"url\": \"$RUN_URL\"
-              }]
-            }" \
-         "$DISCORD_WEBHOOK"
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d "{
+                    \"embeds\": [{
+                      \"title\": \"$TITLE\",
+                      \"description\": \"$DESCRIPTION_ESCAPED\",
+                      \"color\": $COLOR,
+                      \"footer\": { \"text\": \"GitHub Actions • $(date '+%Y-%m-%d %H:%M:%S')\" },
+                      \"url\": \"$RUN_URL\"
+                    }]
+                  }" \
+               "$DISCORD_WEBHOOK"
